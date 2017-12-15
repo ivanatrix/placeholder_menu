@@ -1,0 +1,252 @@
+<?php
+/**
+ *Implementation of hook_menu()
+ */
+function placeholder_menu_menu() {
+  $items = array();
+
+  //Add nolink and separator as a dummy pages.
+  $noLink    = 'nolink';
+  $separator = 'separator';
+
+  $items[$noLink] = array(
+    'page callback'    => 'placeholder_menu_dummy',
+    'access callback'  => TRUE,
+    'type'             => MENU_CALLBACK,
+  );
+
+  $items[$separator] = array(
+    'page callback'    => 'placeholder_menu_dummy',
+    'access callback'  => TRUE,
+    'type'             => MENU_CALLBACK,
+  );
+
+  $items['admin/settings/placeholder_menu'] = array(
+    'title'            => 'Placeholder Menu',
+    'description'      => 'Configure Placeholder Menu.',
+    'page callback'    => 'drupal_get_form',
+    'page arguments'   => array('placeholder_menu_admin_settings_form'),
+    'access arguments' => array('administer site configuration'),
+    'type'             => MENU_NORMAL_ITEM,
+  );
+
+  return $items;
+}
+
+
+/**
+ * Page callback
+*/
+function placeholder_menu_dummy() {
+  $output = 'This is a dummy page used for placeholder and separator menu items. You should not be able to see this page';
+  return t($output);
+}
+
+/**
+ * Override of theme_menu_item()
+ * This function will add a class to separator and nolink <li> tags for easier styling
+ * Generate the HTML output for a menu item and submenu.
+ *
+ * @ingroup themeable
+ */
+function placeholder_menuoverwrite_menu_item($link, $has_children, $menu = '', $in_active_trail = FALSE, $extra_class = NULL) {
+  $class = ($menu ? 'expanded' : ($has_children ? 'collapsed' : 'leaf'));
+  if (!empty($extra_class)) {
+    $class .= ' '. $extra_class;
+  }
+  if ($in_active_trail) {
+    $class .= ' active-trail';
+  }
+
+  if (strpos($link,'class="nolink"') !== FALSE) {
+    $class.=' nolink-li';
+  }
+  if (strpos($link,'class="separator"') !== FALSE) {
+    $class.=' separator-li';
+  }
+
+  return '<li class="'. $class .'">'. $link . $menu ."</li>\n";
+}
+
+/**
+ * Override of theme_menu_item_link()
+ * This function will render link if it is "nolink" or "separator". Otherwise it will call originally
+ * overwriten menu_item_link function.
+ */
+function placeholder_menuoverwrite_menu_item_link($link) {
+  global $theme_key;
+  
+  $theme_overwrite = variable_get('oldtheme_menu_item_link', array());
+  
+  if (empty($link['localized_options'])) {
+    $link['localized_options'] = array();
+  }
+
+  if (strpos($link['href'], 'nolink') === 0) {
+    // Allow if the menu link is nolink:
+    $link['localized_options']['html'] = TRUE;
+
+    //Retrieve tag for nolink menu item
+    $tag=variable_get('placeholder_menu_nolink_tag','<span>');
+
+    //Set class for nolink
+    $css='nolink';
+
+    //Return HTML span instead of a link
+    return render_menu_item($tag,$link['title'],$css);
+  }
+  elseif (strpos($link['href'], 'separator') === 0) {
+    // Allow if the menu link is separator
+    $link['localized_options']['html'] = TRUE;
+
+    //Retrieve tags and value for separator menu item
+    $tag=variable_get('placeholder_menu_separator_tag','<span>');
+    $value=variable_get('placeholder_menu_separator_value','<hr>');
+
+    //Set class for separator
+    $css='separator';
+
+    //Return separator menu item
+    return render_menu_item($tag,$value,$css);
+  }
+  elseif (array_key_exists($theme_key, $theme_overwrite) && function_exists($theme_overwrite[$theme_key])) {
+    return call_user_func($theme_overwrite[$theme_key], $link);
+  }
+  else {
+    theme_menu_item_link($link);
+  }
+}
+
+/**
+ * Returns menu item rendered.
+ */
+function render_menu_item($tag,$value,$css=null) {
+  $length=strlen($tag);
+
+  //Validate the tags
+  if ($tag[0]=='<' && $tag[$length-1]=='>') {
+    $closingtag=str_replace('<','</',$tag);
+    if($css)
+        $tag=str_replace('>',' class="'.$css.'">',$tag);
+  }
+  else {
+    if ($css) {
+      $classtag = '<' . $tag . ' class="' . $css . '">';
+      $tag = '<' . $tag . '>';
+      $closingtag = str_replace('<', '</', $tag);
+      $tag = $classtag;
+    }
+    else {
+      $tag = '<' . $tag . '>';
+      $closingtag = str_replace('<', '</', $tag);
+    }
+  }
+  return $tag.$value.$closingtag;
+}
+
+/**
+ * Implementation of hook_theme_registry_alter()
+ * We replace theme_menu_item_link with our own function.
+ */
+function placeholder_menu_theme_registry_alter(&$theme_registry) {
+  global $theme_key;
+
+  $theme_overwrite = variable_get('oldtheme_menu_item_link', array());
+  // Save previous value from registry in case another theme overwrites menu_item_link
+  $theme_overwrite[$theme_key] = $theme_registry['menu_item_link']['function'];
+  
+  //Store the value
+  variable_set('oldtheme_menu_item_link', $theme_overwrite);
+
+  // Replace theme_menu_item_link with our placeholder_menuoverwrite_menu_item_link.
+   $theme_registry['menu_item_link']['function'] = 'placeholder_menuoverwrite_menu_item_link';
+   $theme_registry['menu_item_link']['theme paths'] = drupal_get_path('module', 'placeholder_menu');;
+   $theme_registry['menu_item']['function'] = 'placeholder_menuoverwrite_menu_item';
+}
+
+/**
+ * Implementation of hook_form_alter()
+ * Description changed, added nolink and separator as path types.
+ */
+function placeholder_menu_form_alter(&$form, $form_state, $form_id) {
+
+  if ($form_id == 'menu_edit_item') {
+    $default_value = $form['menu']['link_path']['#default_value'];
+
+    if(preg_match('/^nolink\/[0-9]+$/',$default_value)) {
+      $default_value='nolink';
+    }
+    elseif (preg_match("/^separator\/[0-9]+$/",$default_value)) {
+      $default_value='separator';
+    }
+
+    $form['menu']['link_path']['#default_value'] = $default_value;
+    $form['menu']['link_path']['#description'] =  t('The path this menu item links to. Example: Enter stoves/wood-burning-stoves to link to www.woodburningstoves.co.uk.com/stoves/wood-burning-stoves. Enter "nolink" to generate non-linkable item.');
+  }
+}
+
+/**
+ * Implementation of hook_init().
+ */
+function placeholder_menu_init() {
+
+  //Make breadcrumb of nolink menu item nonlinkable.
+  $breadcrumb = drupal_get_breadcrumb();
+
+  foreach ($breadcrumb as $key=>$crumb) {
+
+    if (strlen(strstr($crumb,'nolink'))>0) {
+      $crumb=strip_tags($crumb);
+      $tag=variable_get('placeholder_menu_nolink_tag','<span>');
+      $breadcrumb[$key]=render_menu_item($tag,$crumb);
+    }
+  }
+  drupal_set_breadcrumb($breadcrumb);
+}
+
+/**
+ *
+ * @return
+ */
+function placeholder_menu_admin_settings_form() {
+  $form['placeholder_menu_nolink_tag'] = array(
+    '#type' => 'textfield',
+    '#title' => t('HTML tag for "nolink"'),
+    '#description' => t('By default, PM will use a span tag for the nolink menu item. Here you can specify your own tag.'),
+    '#default_value' => variable_get('placeholder_menu_nolink_tag', '<span>'),
+
+  );
+
+  $form['placeholder_menu_separator_tag'] = array(
+    '#type' => 'textfield',
+    '#title' => t('HTML tag for "separator"'),
+    '#description' => t('By default, PM Items will use a span tag for the separator menu item. Here you can specify your own tag.'),
+    '#default_value' => variable_get('placeholder_menu_separator_tag', '<span>'),
+
+  );
+
+    $form['placeholder_menu_separator_value'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Value to be displayed for the "separator"'),
+    '#description' => t('By default, PM Items will use a "&lt;hr&gt;" value for the separator. You can specify your own value for the separator.'),
+    '#default_value' => variable_get('placeholder_menu_separator_value', '<hr>'),
+
+  );
+
+  return system_settings_form($form);
+}
+
+function placeholder_menu_footer() {
+  if (strpos($_GET['q'],'admin/build/menu-customize') !== FALSE) {
+    //do all links in db
+    global $db_type;
+    if ($db_type == 'pgsql') {
+      db_query("UPDATE {menu_links} SET link_path=link_path||'/'||mlid WHERE (link_path='nolink' OR link_path='separator') AND hidden != -1");
+    }
+    else {
+      db_query("UPDATE {menu_links} SET link_path=CONCAT(CONCAT(link_path,'/'),mlid) WHERE (link_path='nolink' OR link_path='separator') AND hidden!=-1");
+    }
+
+	  cache_clear_all();
+  }
+}
